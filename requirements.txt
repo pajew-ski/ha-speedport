@@ -1,2 +1,2 @@
-speedport-api==0.5.8
+speedport-api==0.5.9
 pytz>=2023.3

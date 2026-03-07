@@ -89,7 +89,7 @@ class SpeedportOfficeWifiSwitch(SwitchEntity, SpeedportEntity):
 
     @property
     def is_on(self) -> bool | None:
-        return self._speedport.wlan_office_ssid
+        return self._speedport.wlan_office_active
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on switch."""

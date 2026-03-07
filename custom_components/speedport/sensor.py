@@ -17,8 +17,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
 from speedport import Speedport
 
-from custom_components.speedport import DOMAIN
-from custom_components.speedport.device import SpeedportEntity
+from .const import DOMAIN
+from .device import SpeedportEntity
 
 SENSORS: tuple[SensorEntityDescription, ...] = (
     SensorEntityDescription(
@@ -104,7 +104,7 @@ async def async_setup_entry(
     speedport: Speedport = hass.data[DOMAIN][entry.entry_id]
 
     entities = [
-        SpeedportBinarySensor(hass, speedport, description)
+        SpeedportSensor(hass, speedport, description)
         for description in SENSORS
         if speedport.get(description.key) is not None
     ]
@@ -112,7 +112,7 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class SpeedportBinarySensor(SpeedportEntity, SensorEntity):
+class SpeedportSensor(SpeedportEntity, SensorEntity):
     entity_description: SensorEntityDescription
 
     @property
