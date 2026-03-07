@@ -2,18 +2,18 @@
   "domain": "speedport",
   "name": "Speedport",
   "codeowners": [
-    "@Andre0512"
+    "@pajew-ski"
   ],
   "config_flow": true,
   "dependencies": [
     "network"
   ],
-  "documentation": "https://github.com/Andre0512/speedport/",
+  "documentation": "https://github.com/pajew-ski/hacs-speedport",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/Andre0512/speedport/issues",
+  "issue_tracker": "https://github.com/pajew-ski/hacs-speedport/issues",
   "requirements": [
     "speedport-api==0.5.9",
     "pytz>=2023.3"
   ],
-  "version": "0.3.5"
+  "version": "0.3.6"
 }
