@@ -15,6 +15,5 @@
     "speedport-api==0.5.9",
     "pytz>=2023.3"
   ],
-  "homeassistant": "2024.1.0",
   "version": "0.3.6"
 }
