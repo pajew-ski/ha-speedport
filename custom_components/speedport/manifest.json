@@ -8,9 +8,9 @@
   "dependencies": [
     "network"
   ],
-  "documentation": "https://github.com/pajew-ski/hacs-speedport",
+  "documentation": "https://github.com/pajew-ski/ha-speedport",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/pajew-ski/hacs-speedport/issues",
+  "issue_tracker": "https://github.com/pajew-ski/ha-speedport/issues",
   "requirements": [
     "speedport-api==0.5.9",
     "pytz>=2023.3"
