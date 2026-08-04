@@ -92,6 +92,7 @@ class SpeedportBinarySensor(SpeedportEntity, BinarySensorEntity):
             == self.entity_description.value
         )
 
+    @property
     def available(self) -> bool:
         if self._speedport.get(self.entity_description.key) is None:
             return False
