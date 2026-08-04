@@ -22,17 +22,43 @@ async def async_setup_entry(
     """Set up entry."""
 
     speedport: Speedport = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        [
-            SpeedportWifiSwitch(hass, speedport),
-            SpeedportGuestWifiSwitch(hass, speedport),
-            SpeedportOfficeWifiSwitch(hass, speedport),
-        ]
-    )
+
+    entities: list[SpeedportWlanSwitch] = [SpeedportWifiSwitch(hass, speedport)]
+
+    # Not every model provides all wifi networks, e.g. the Speedport Smart 3
+    # does not report "wlan_office_active" because it has no office wifi.
+    if speedport.get("wlan_guest_active") is not None:
+        entities.append(SpeedportGuestWifiSwitch(hass, speedport))
+    else:
+        _LOGGER.debug("Skipping guest wifi switch: not supported by this device")
+
+    if speedport.get("wlan_office_active") is not None:
+        entities.append(SpeedportOfficeWifiSwitch(hass, speedport))
+    else:
+        _LOGGER.debug("Skipping office wifi switch: not supported by this device")
+
+    async_add_entities(entities)
 
 
-class SpeedportWifiSwitch(SwitchEntity, SpeedportEntity):
-    _attr_is_on: bool | None = False
+class SpeedportWlanSwitch(SwitchEntity, SpeedportEntity):
+    _status_key: str = ""
+
+    @property
+    def is_on(self) -> bool | None:
+        if (status := self._speedport.get(self._status_key)) is None:
+            return None
+        try:
+            return bool(int(status))
+        except (TypeError, ValueError):
+            return None
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._speedport.get(self._status_key) is not None
+
+
+class SpeedportWifiSwitch(SpeedportWlanSwitch):
+    _status_key = "use_wlan"
 
     def __init__(self, hass: HomeAssistant, speedport: Speedport) -> None:
         super().__init__(hass, speedport)
@@ -40,10 +66,6 @@ class SpeedportWifiSwitch(SwitchEntity, SpeedportEntity):
         self._attr_icon = "mdi:wifi"
         self._attr_name = f"WLAN {speedport.wlan_ssid}"
         self._attr_unique_id = "wifi"
-
-    @property
-    def is_on(self) -> bool | None:
-        return self._speedport.wlan_active
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on switch."""
@@ -54,8 +76,8 @@ class SpeedportWifiSwitch(SwitchEntity, SpeedportEntity):
         await self._speedport.wifi_off()
 
 
-class SpeedportGuestWifiSwitch(SwitchEntity, SpeedportEntity):
-    _attr_is_on: bool | None = False
+class SpeedportGuestWifiSwitch(SpeedportWlanSwitch):
+    _status_key = "wlan_guest_active"
 
     def __init__(self, hass: HomeAssistant, speedport: Speedport) -> None:
         super().__init__(hass, speedport)
@@ -63,10 +85,6 @@ class SpeedportGuestWifiSwitch(SwitchEntity, SpeedportEntity):
         self._attr_icon = "mdi:wifi"
         self._attr_name = f"WLAN {speedport.wlan_guest_ssid}"
         self._attr_unique_id = "wifi_guest"
-
-    @property
-    def is_on(self) -> bool | None:
-        return self._speedport.wlan_guest_active
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on switch."""
@@ -77,8 +95,8 @@ class SpeedportGuestWifiSwitch(SwitchEntity, SpeedportEntity):
         await self._speedport.wifi_guest_off()
 
 
-class SpeedportOfficeWifiSwitch(SwitchEntity, SpeedportEntity):
-    _attr_is_on: bool | None = False
+class SpeedportOfficeWifiSwitch(SpeedportWlanSwitch):
+    _status_key = "wlan_office_active"
 
     def __init__(self, hass: HomeAssistant, speedport: Speedport) -> None:
         super().__init__(hass, speedport)
@@ -86,10 +104,6 @@ class SpeedportOfficeWifiSwitch(SwitchEntity, SpeedportEntity):
         self._attr_icon = "mdi:wifi"
         self._attr_name = f"WLAN {speedport.wlan_office_ssid}"
         self._attr_unique_id = "wifi_office"
-
-    @property
-    def is_on(self) -> bool | None:
-        return self._speedport.wlan_office_active
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on switch."""

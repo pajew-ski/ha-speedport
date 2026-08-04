@@ -125,6 +125,7 @@ class SpeedportSensor(SpeedportEntity, SensorEntity):
             return pytz.timezone("Europe/Berlin").localize(date)
         return data
 
+    @property
     def available(self) -> bool:
         if self._speedport.get(self.entity_description.key) is None:
             return False
