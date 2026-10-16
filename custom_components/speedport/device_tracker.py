@@ -27,8 +27,16 @@ async def async_setup_entry(
     speedport = hass.data[DOMAIN][entry.entry_id]
     coordinator = SpeedportCoordinator(hass, speedport)
     await coordinator.async_config_entry_first_refresh()
-    devices = [SpeedportTracker(coordinator, mac) for mac in await speedport.devices]
-    async_add_entities(devices)
+    tracked: set[str] = set()
+
+    @callback
+    def _add_new_devices() -> None:
+        new = coordinator.data.keys() - tracked
+        tracked.update(new)
+        async_add_entities(SpeedportTracker(coordinator, mac) for mac in new)
+
+    _add_new_devices()
+    entry.async_on_unload(coordinator.async_add_listener(_add_new_devices))
 
 
 class SpeedportCoordinator(DataUpdateCoordinator):

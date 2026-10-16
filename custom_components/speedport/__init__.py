@@ -6,10 +6,27 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import aiohttp_client
-from speedport import Speedport
+from speedport import Speedport, connection, exceptions
 
 from .config_flow import OptionsFlowHandler
 from .const import DOMAIN
+
+_decode = connection.decode
+
+
+def _decode_mac_safe(data, key: str = ""):
+    # A router session replaced or expired (web UI login, timeout) answers with
+    # another key; the library raises a bare ValueError ("MAC check failed") that
+    # its need_auth wrapper ignores, so it never logs in again. Map it to the
+    # error need_auth handles (pause, then re-login).
+    # shortcut: patches speedport-api <= 0.6.0, drop once upstream decode() maps it.
+    try:
+        return _decode(data, key)
+    except ValueError as exc:
+        raise exceptions.DecryptionKeyError("Wrong decryption key") from exc
+
+
+connection.decode = _decode_mac_safe
 
 PLATFORMS: list[Platform] = [
     Platform.BUTTON,
