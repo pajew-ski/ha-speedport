@@ -13,19 +13,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Von der Mindestversion aus hacs.json bis zur aktuellen; was darunter lag,
+        # verspricht die Integration nicht mehr.
         include:
-          - home-assistant: "2024.1.0"
-            python-version: "3.11"
-          - home-assistant: "2024.2.0"
-            python-version: "3.12"
-          - home-assistant: "2024.6.0"
-            python-version: "3.12"
           - home-assistant: "2024.12.0"
-            python-version: "3.12"
-          - home-assistant: "2025.1.0"
             python-version: "3.12"
           - home-assistant: "2025.3.0"
             python-version: "3.13"
+          - home-assistant: "2026.10.2"
+            python-version: "3.14"
 
     steps:
     - uses: actions/checkout@v4
@@ -39,6 +35,18 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install -r requirements.txt
         python -m pip install -r requirements_dev.txt
+    # flake8 und black sehen die HA-API nicht: erst der Import zeigt, ob die
+    # Module gegen diese Version laden und die Zeitzone der Instanz greift.
+    - name: Import gegen Home Assistant
+      run: |
+        python -c "
+        from datetime import datetime
+        from homeassistant.util import dt as dt_util
+        import custom_components.speedport.sensor as s
+        t = datetime(2026, 10, 17, 12, 0).replace(tzinfo=dt_util.get_default_time_zone())
+        assert t.utcoffset() is not None
+        print('ok', s.__name__)
+        "
     - name: Lint with flake8
       run: |
         # stop the build if there are Python syntax errors or undefined names
