@@ -1,6 +1,5 @@
 from datetime import datetime
 
-import pytz
 from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorDeviceClass,
@@ -15,6 +14,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
+from homeassistant.util import dt as dt_util
 from speedport import Speedport
 
 from .const import DOMAIN
@@ -122,7 +122,9 @@ class SpeedportSensor(SpeedportEntity, SensorEntity):
             return None
         if self.entity_description.device_class == SensorDeviceClass.TIMESTAMP:
             date = datetime.strptime(data, "%Y-%m-%d %H:%M:%S").replace(second=0)
-            return pytz.timezone("Europe/Berlin").localize(date)
+            # Der Router meldet Ortszeit. Die Zeitzone der Instanz ist geladen; pytz.timezone()
+            # las seine Datei in der Event-Schleife und HA meldete das als blockierend.
+            return date.replace(tzinfo=dt_util.get_default_time_zone())
         return data
 
     @property
