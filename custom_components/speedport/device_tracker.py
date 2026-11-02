@@ -38,7 +38,7 @@ async def async_setup_entry(
     def _add_new_devices() -> None:
         new = coordinator.data.keys() - tracked
         tracked.update(new)
-        async_add_entities(SpeedportTracker(coordinator, mac) for mac in new)
+        async_add_entities(SpeedportTracker(coordinator, mac, tracked) for mac in new)
 
     _add_new_devices()
     entry.async_on_unload(coordinator.async_add_listener(_add_new_devices))
@@ -62,9 +62,12 @@ class SpeedportCoordinator(DataUpdateCoordinator):
 class SpeedportTracker(CoordinatorEntity, ScannerEntity):
     _attr_has_entity_name = not _LEGACY_SCANNER
 
-    def __init__(self, coordinator: SpeedportCoordinator, mac: str) -> None:
+    def __init__(
+        self, coordinator: SpeedportCoordinator, mac: str, tracked: set[str]
+    ) -> None:
         super().__init__(coordinator)
         self._mac = mac
+        self._tracked = tracked
         self._device: WlanDevice = self.coordinator.data.get(mac)
         self._attr_device_info = DeviceInfo(
             connections={(CONNECTION_NETWORK_MAC, mac)},
@@ -151,6 +154,10 @@ class SpeedportTracker(CoordinatorEntity, ScannerEntity):
         except AttributeError:
             """The device is disconnected or unavailable in the router."""
             return ""
+
+    async def async_removed_from_registry(self) -> None:
+        # Gerät gelöscht: kommt der Client wieder, bekommt er einen neuen Tracker.
+        self._tracked.discard(self._mac)
 
     @callback
     def _handle_coordinator_update(self) -> None:
