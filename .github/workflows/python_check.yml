@@ -22,6 +22,9 @@ jobs:
             python-version: "3.13"
           - home-assistant: "2026.10.2"
             python-version: "3.14"
+          # Ab 2026.11 gehören Tracker zu Geräten (Issue #12).
+          - home-assistant: "2026.11.0b1"
+            python-version: "3.14"
 
     steps:
     - uses: actions/checkout@v4
@@ -45,7 +48,10 @@ jobs:
         import custom_components.speedport.sensor as s
         t = datetime(2026, 10, 17, 12, 0).replace(tzinfo=dt_util.get_default_time_zone())
         assert t.utcoffset() is not None
-        print('ok', s.__name__)
+        from homeassistant.const import MAJOR_VERSION, MINOR_VERSION
+        import custom_components.speedport.device_tracker as dt
+        assert dt._LEGACY_SCANNER is ((MAJOR_VERSION, MINOR_VERSION) < (2026, 11))
+        print('ok', s.__name__, dt.__name__)
         "
     - name: Lint with flake8
       run: |

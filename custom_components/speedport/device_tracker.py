@@ -6,6 +6,7 @@ from datetime import timedelta
 from homeassistant.components.device_tracker import ScannerEntity, SourceType
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.device_registry import CONNECTION_NETWORK_MAC, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
@@ -17,6 +18,10 @@ from speedport.device import WlanDevice
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+# Bis Home Assistant Tracker in Geräte aufnimmt, ist ScannerEntity.device_info
+# final und liefert None: dort braucht der Tracker weiter einen eigenen Namen.
+_LEGACY_SCANNER = "device_info" in vars(ScannerEntity)
 
 
 async def async_setup_entry(
@@ -33,7 +38,7 @@ async def async_setup_entry(
     def _add_new_devices() -> None:
         new = coordinator.data.keys() - tracked
         tracked.update(new)
-        async_add_entities(SpeedportTracker(coordinator, mac) for mac in new)
+        async_add_entities(SpeedportTracker(coordinator, mac, tracked) for mac in new)
 
     _add_new_devices()
     entry.async_on_unload(coordinator.async_add_listener(_add_new_devices))
@@ -55,10 +60,19 @@ class SpeedportCoordinator(DataUpdateCoordinator):
 
 
 class SpeedportTracker(CoordinatorEntity, ScannerEntity):
-    def __init__(self, coordinator: SpeedportCoordinator, mac: str) -> None:
+    _attr_has_entity_name = not _LEGACY_SCANNER
+
+    def __init__(
+        self, coordinator: SpeedportCoordinator, mac: str, tracked: set[str]
+    ) -> None:
         super().__init__(coordinator)
         self._mac = mac
+        self._tracked = tracked
         self._device: WlanDevice = self.coordinator.data.get(mac)
+        self._attr_device_info = DeviceInfo(
+            connections={(CONNECTION_NETWORK_MAC, mac)},
+            name=self._device.name or mac,
+        )
         self._attr_entity_registry_enabled_default = True
         self._attr_entity_registry_visible_default = True
 
@@ -130,13 +144,20 @@ class SpeedportTracker(CoordinatorEntity, ScannerEntity):
         return attrs
 
     @property
-    def name(self) -> str:
+    def name(self) -> str | None:
+        if not _LEGACY_SCANNER:
+            # Hauptfunktion des Geräts: der Tracker trägt den Gerätenamen.
+            return None
         try:
             """Return device name."""
             return self._device.name
         except AttributeError:
             """The device is disconnected or unavailable in the router."""
             return ""
+
+    async def async_removed_from_registry(self) -> None:
+        # Gerät gelöscht: kommt der Client wieder, bekommt er einen neuen Tracker.
+        self._tracked.discard(self._mac)
 
     @callback
     def _handle_coordinator_update(self) -> None:

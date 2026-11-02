@@ -6,6 +6,11 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import aiohttp_client
+from homeassistant.helpers.device_registry import (
+    CONNECTION_NETWORK_MAC,
+    DeviceEntry,
+    format_mac,
+)
 from speedport import Speedport, connection, exceptions
 
 from .config_flow import OptionsFlowHandler
@@ -71,3 +76,17 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await speedport.close()
 
     return unload_ok
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: ConfigEntry, device: DeviceEntry
+) -> bool:
+    """Allow removing a client device the router no longer reports."""
+    if any(domain == DOMAIN for domain, _ in device.identifiers):
+        return False  # the router itself
+    speedport: Speedport = hass.data[DOMAIN][entry.entry_id]
+    reported = {format_mac(mac) for mac in await speedport.devices}
+    return not any(
+        kind == CONNECTION_NETWORK_MAC and mac in reported
+        for kind, mac in device.connections
+    )
