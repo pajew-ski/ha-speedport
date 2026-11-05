@@ -1,15 +1,25 @@
 {
     "config": {
         "abort": {
-            "already_configured": "Equipamento já configurado"
+            "already_configured": "Equipamento já configurado",
+            "reconfigure_successful": "A reconfiguração foi bem-sucedida"
         },
         "error": {
-            "cannot_connect": "Falha na ligação",
+            "cannot_connect": "Falha na ligação. Se o host for um nome como speedport.ip, introduza o IP do router, p. ex. 192.168.2.1",
             "invalid_auth": "Falha na autenticação",
             "unknown": "Erro desconhecido"
         },
         "step": {
             "user": {
+                "data": {
+                    "host": "Host",
+                    "password": "Senha",
+                    "https": "Use uma ligação https"
+                }
+            },
+            "reconfigure": {
+                "title": "Reconfigurar Speedport",
+                "description": "Altera como o Home Assistant acede ao router. Deixe a senha vazia para manter a guardada.",
                 "data": {
                     "host": "Host",
                     "password": "Senha",
