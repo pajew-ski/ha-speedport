@@ -1,7 +1,5 @@
 """The Speedport integration."""
 
-import asyncio
-
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
@@ -55,7 +53,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ).create()
     hass.data[DOMAIN][entry.entry_id] = speedport
     hass.data[DOMAIN]["coordinators"] = {}
-    await asyncio.gather(*[speedport.update_status(), speedport.update_ip_data()])
+    # Nacheinander wie im Coordinator (device.py, Issue #16).
+    await speedport.update_status()
+    await speedport.update_ip_data()
 
     entry.async_on_unload(entry.add_update_listener(update_listener))
 

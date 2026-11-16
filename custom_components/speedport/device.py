@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from datetime import timedelta
 
@@ -28,9 +27,12 @@ class SpeedportCoordinator(DataUpdateCoordinator[None]):
         self._speedport: Speedport = device
 
     async def _async_update_data(self) -> None:
-        await asyncio.gather(
-            *[self._speedport.update_status(), self._speedport.update_ip_data()]
-        )
+        # Nacheinander, nicht parallel: beide teilen Cookie-Jar und Router-Session,
+        # und ein Re-Login in update_ip_data() leert den Jar, während Status.json
+        # noch unterwegs sein kann. Parallel kam IPData.json dann mit fremdem
+        # Schlüssel zurück (DecryptionKeyError, Issue #16).
+        await self._speedport.update_status()
+        await self._speedport.update_ip_data()
 
 
 class SpeedportEntity(CoordinatorEntity[SpeedportCoordinator]):
