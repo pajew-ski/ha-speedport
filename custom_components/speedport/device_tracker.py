@@ -11,11 +11,13 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
     DataUpdateCoordinator,
+    UpdateFailed,
 )
-from speedport import Speedport
-from speedport.device import WlanDevice
 
 from .const import DOMAIN
+from .device import UPDATE_ERRORS
+from .speedport_api import Speedport
+from .speedport_api.device import WlanDevice
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,7 +58,10 @@ class SpeedportCoordinator(DataUpdateCoordinator):
         self._api: Speedport = api
 
     async def _async_update_data(self):
-        return await self._api.devices
+        try:
+            return await self._api.devices
+        except UPDATE_ERRORS as exc:
+            raise UpdateFailed(str(exc)) from exc
 
 
 class SpeedportTracker(CoordinatorEntity, ScannerEntity):

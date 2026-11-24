@@ -1,1 +1,1 @@
-speedport-api==0.5.9
+pycryptodome>=3.18

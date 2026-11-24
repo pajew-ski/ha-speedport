@@ -3,33 +3,18 @@
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import aiohttp_client
+from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
 from homeassistant.helpers.device_registry import (
     CONNECTION_NETWORK_MAC,
     DeviceEntry,
     format_mac,
 )
-from speedport import Speedport, connection, exceptions
 
 from .config_flow import OptionsFlowHandler
 from .const import DOMAIN
-
-_decode = connection.decode
-
-
-def _decode_mac_safe(data, key: str = ""):
-    # A router session replaced or expired (web UI login, timeout) answers with
-    # another key; the library raises a bare ValueError ("MAC check failed") that
-    # its need_auth wrapper ignores, so it never logs in again. Map it to the
-    # error need_auth handles (pause, then re-login).
-    # shortcut: patches speedport-api <= 0.6.0, drop once upstream decode() maps it.
-    try:
-        return _decode(data, key)
-    except ValueError as exc:
-        raise exceptions.DecryptionKeyError("Wrong decryption key") from exc
-
-
-connection.decode = _decode_mac_safe
+from .device import UPDATE_ERRORS, async_create_session
+from .speedport_api import Speedport
+from .speedport_api.exceptions import LoginException
 
 PLATFORMS: list[Platform] = [
     Platform.BUTTON,
@@ -44,18 +29,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Speedport from a config entry."""
 
     hass.data.setdefault(DOMAIN, {})
-    speedport = await Speedport(
+    speedport = Speedport(
         host=entry.data["host"],
         password=entry.data["password"],
         https=entry.data["https"],
-        session=aiohttp_client.async_get_clientsession(hass),
+        session=async_create_session(hass),
         pause_time=entry.options.get("pause_time", 5),
-    ).create()
+    )
+    try:
+        await speedport.create()
+        # Strict here: sensors exist only for values present now, so a router
+        # that is not ready must postpone the setup instead of dropping them.
+        await speedport.update_ip_data()
+    except LoginException as exc:
+        raise ConfigEntryError(f"The router rejected the login: {exc}") from exc
+    except UPDATE_ERRORS as exc:
+        raise ConfigEntryNotReady(str(exc)) from exc
     hass.data[DOMAIN][entry.entry_id] = speedport
     hass.data[DOMAIN]["coordinators"] = {}
-    # Nacheinander wie im Coordinator (device.py, Issue #16).
-    await speedport.update_status()
-    await speedport.update_ip_data()
 
     entry.async_on_unload(entry.add_update_listener(update_listener))
 
@@ -72,8 +63,7 @@ async def update_listener(hass, entry):
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        speedport = hass.data[DOMAIN].pop(entry.entry_id)
-        await speedport.close()
+        hass.data[DOMAIN].pop(entry.entry_id)
 
     return unload_ok
 

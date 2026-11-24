@@ -7,8 +7,10 @@
 > **This is an actively maintained fork of the [original Speedport integration](https://github.com/Andre0512/speedport) by [@Andre0512](https://github.com/Andre0512), which is no longer maintained.**
 > If you are currently using the original integration, you can switch to this fork to continue receiving updates and bug fixes.
 
-Telekom Speedport Integration for Home Assistant based
-on [speedport-api](https://github.com/Andre0512/speedport-api.git).
+Telekom Speedport Integration for Home Assistant. The router protocol code in
+`custom_components/speedport/speedport_api` is derived from
+[speedport-api](https://github.com/Andre0512/speedport-api.git) by @Andre0512 (MIT),
+which is no longer released, and is maintained here.
 
 ## Features
 

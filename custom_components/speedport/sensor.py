@@ -15,7 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
 from homeassistant.util import dt as dt_util
-from speedport import Speedport
+from .speedport_api import Speedport
 
 from .const import DOMAIN
 from .device import SpeedportEntity

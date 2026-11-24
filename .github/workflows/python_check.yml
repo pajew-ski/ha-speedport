@@ -53,6 +53,9 @@ jobs:
         assert dt._LEGACY_SCANNER is ((MAJOR_VERSION, MINOR_VERSION) < (2026, 11))
         print('ok', s.__name__, dt.__name__)
         "
+    # Session-Verlust, Wiederanmeldung und Lock gegen einen nachgebauten Router.
+    - name: Tests
+      run: python -m unittest discover -s tests -v
     - name: Lint with flake8
       run: |
         # stop the build if there are Python syntax errors or undefined names
