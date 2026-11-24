@@ -1,17 +1,33 @@
 import logging
+from contextlib import suppress
 from datetime import timedelta
 
+import aiohttp
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import (
-    DataUpdateCoordinator,
     CoordinatorEntity,
+    DataUpdateCoordinator,
+    UpdateFailed,
 )
-from .speedport_api import Speedport
 
 from .const import DOMAIN, UPDATE_INTERVAL
+from .speedport_api import Speedport
+from .speedport_api.exceptions import LoginException, LoginPausedError, SessionError
 
 _LOGGER = logging.getLogger(__name__)
+
+# What a router that is rebooting, unreachable or not serving data raises.
+UPDATE_ERRORS = (aiohttp.ClientError, TimeoutError, SessionError, LoginPausedError)
+
+
+def async_create_session(hass: HomeAssistant, **kwargs) -> aiohttp.ClientSession:
+    """Session with its own cookie jar: the router's session cookies stay out of
+    Home Assistant's shared session, and an IP host needs an unsafe jar."""
+    return aiohttp_client.async_create_clientsession(
+        hass, verify_ssl=False, cookie_jar=aiohttp.CookieJar(unsafe=True), **kwargs
+    )
 
 
 class SpeedportCoordinator(DataUpdateCoordinator[None]):
@@ -27,12 +43,14 @@ class SpeedportCoordinator(DataUpdateCoordinator[None]):
         self._speedport: Speedport = device
 
     async def _async_update_data(self) -> None:
-        # Nacheinander, nicht parallel: beide teilen Cookie-Jar und Router-Session,
-        # und ein Re-Login in update_ip_data() leert den Jar, während Status.json
-        # noch unterwegs sein kann. Parallel kam IPData.json dann mit fremdem
-        # Schlüssel zurück (DecryptionKeyError, Issue #16).
-        await self._speedport.update_status()
-        await self._speedport.update_ip_data()
+        try:
+            await self._speedport.update_status()
+            # A lost session only pauses the IP data (the API logs it and logs in
+            # again after the pause); the status needs no login and stays live.
+            with suppress(LoginPausedError, LoginException):
+                await self._speedport.update_ip_data()
+        except UPDATE_ERRORS as exc:
+            raise UpdateFailed(str(exc)) from exc
 
 
 class SpeedportEntity(CoordinatorEntity[SpeedportCoordinator]):

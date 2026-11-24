@@ -4,10 +4,10 @@ import logging
 import re
 from hashlib import sha256
 from json import JSONDecodeError
-from typing import Self
 
 import aiohttp
 from Crypto.Cipher import AES
+from yarl import URL
 
 from . import const, exceptions
 
@@ -20,9 +20,16 @@ def decode(data, key: str = "") -> dict[str, list | dict | str] | str:
     try:
         ciphertext_tag = bytes.fromhex(data)
     except ValueError as exc:
-        raise exceptions.DecryptionKeyError("Wrong decryption key") from exc
+        raise exceptions.UnexpectedResponseError(
+            "Router answered with a page instead of data"
+        ) from exc
     cipher = AES.new(bytes.fromhex(key), AES.MODE_CCM, bytes.fromhex(key)[:8])
-    decrypted = cipher.decrypt_and_verify(ciphertext_tag[:-16], ciphertext_tag[-16:])
+    try:
+        decrypted = cipher.decrypt_and_verify(
+            ciphertext_tag[:-16], ciphertext_tag[-16:]
+        )
+    except ValueError as exc:  # "MAC check failed"
+        raise exceptions.DecryptionKeyError("Wrong decryption key") from exc
     try:
         return simplify_response(json.loads(decrypted.decode()))
     except JSONDecodeError:
@@ -38,7 +45,7 @@ def encode(data, key: str = "") -> str:
 
 
 def simplify_response(
-    data: list[dict[str, str | list[dict[str, str]]]]
+    data: list[dict[str, str | list[dict[str, str]]]],
 ) -> dict[str, list | dict | str]:
     """Remove 'varid' and 'varvalue' to have a flatter data structure without overhead"""
     result = {}
@@ -54,42 +61,24 @@ def simplify_response(
 
 
 class Connection:
-    def __init__(
-        self,
-        host_url: str = "",
-        session: aiohttp.ClientSession | None = None,
-    ):
+    def __init__(self, host_url: str, session: aiohttp.ClientSession):
+        """The session needs a cookie jar that accepts cookies from IP hosts
+        (aiohttp.CookieJar(unsafe=True)); the caller owns and closes it."""
         self._login_key = ""
         self._url = host_url
-        self._own_session = session is None
-        self._session: aiohttp.ClientSession | None = session
-        self._verify_ssl: bool = False
-        self._timeout: float = 30
+        self._session = session
+        # The router's https certificate is self-signed.
+        self._kwargs = {"ssl": False, "timeout": aiohttp.ClientTimeout(total=30)}
 
-    async def __aenter__(self):
-        return await self.create()
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.close()
-
-    @property
-    def _kwargs(self):
-        return {"verify_ssl": self._verify_ssl, "timeout": self._timeout}
-
-    async def create(self) -> Self:
-        """Create aiohttp session"""
-        connector = aiohttp.TCPConnector(verify_ssl=self._verify_ssl)
-        if not self._session:
-            jar = aiohttp.CookieJar(unsafe=True)
-            self._session = aiohttp.ClientSession(connector=connector, cookie_jar=jar)
-        else:
-            self._session.cookie_jar._unsafe = True
-        return self
-
-    async def close(self):
-        """Close aiohttp session"""
-        if self._own_session:
-            await self._session.close()
+    @staticmethod
+    async def _decode(response: aiohttp.ClientResponse, key: str = ""):
+        try:
+            return decode(await response.text(), key=key)
+        except exceptions.UnexpectedResponseError as exc:
+            raise exceptions.UnexpectedResponseError(
+                f"{response.url.path} answered HTTP {response.status} with a page "
+                "instead of data (not logged in or not available)"
+            ) from exc
 
     async def get(self, path: str, auth: bool = False, referer: str = ""):
         url = f"{self._url}/{path}"
@@ -102,7 +91,7 @@ class Connection:
         ) as response:
             _LOGGER.debug("GET - %s - %s", url, response.status)
             key = self._login_key if auth else const.DEFAULT_KEY
-            return decode(await response.text(), key=key)
+            return await self._decode(response, key)
 
     async def post(self, path: str, data: dict[str, str], referer: str):
         url = f"{self._url}/{path}"
@@ -115,7 +104,7 @@ class Connection:
             url, headers={"Referer": referer}, data=data, **self._kwargs
         ) as response:
             _LOGGER.debug("POST - %s - %s", url, response.status)
-            return decode(await response.text(), key=self._login_key)
+            return await self._decode(response, self._login_key)
 
     async def _get_httoken(self, url: str) -> str:
         async with self._session.get(url, **self._kwargs) as response:
@@ -124,29 +113,35 @@ class Connection:
                 return token[0]
             return ""
 
-    async def _get_login_key(self):
-        data = {"getChallenge": "1"}
-        if response := await self.post("data/Login.json", data, "/"):
-            self._login_key = response["challenge"]
-        return self._login_key
+    async def _get_challenge(self) -> str:
+        response = await self.post("data/Login.json", {"getChallenge": "1"}, "/")
+        try:
+            return response["challenge"]
+        except (KeyError, TypeError) as exc:
+            raise exceptions.UnexpectedResponseError(
+                f"No login challenge in {response!r}"
+            ) from exc
 
     async def login(self, password: str):
         url = f"{self._url}/data/Login.json"
         self.clear()
-        login_data = f"{await self._get_login_key()}:{password}".encode()
-        login_key = sha256(login_data).hexdigest()
+        challenge = await self._get_challenge()
+        login_key = sha256(f"{challenge}:{password}".encode()).hexdigest()
         data = encode("showpw=0&password=" + login_key)
         async with self._session.post(url, data=data, **self._kwargs) as response:
             _LOGGER.debug("POST - %s - %s", url, response.status)
-            result = decode(await response.text())
+            result = await self._decode(response)
             _LOGGER.debug(result)
+        if not isinstance(result, dict):
+            raise exceptions.UnexpectedResponseError(f"No login result in {result!r}")
         if (sleep_time := result.get("login_locked")) and int(sleep_time) < 60:
             _LOGGER.warning("Can't login, wait %ss...", sleep_time)
             await asyncio.sleep(int(sleep_time) + 1)
             return await self.login(password)
-        if result["login"] != "success":
-            _LOGGER.error(result)
-            raise exceptions.LoginException("Can't login")
+        if result.get("login") != "success":
+            raise exceptions.LoginException(f"Can't login: {result}")
+        # Only now: is_logged_in must not be true for a login that failed halfway.
+        self._login_key = challenge
         return result["login"]
 
     @property
@@ -155,4 +150,4 @@ class Connection:
 
     def clear(self):
         self._login_key = ""
-        self._session.cookie_jar.clear_domain(self._url)
+        self._session.cookie_jar.clear_domain(URL(self._url).host)

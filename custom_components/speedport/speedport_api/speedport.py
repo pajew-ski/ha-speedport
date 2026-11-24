@@ -1,44 +1,23 @@
-import logging
-from contextlib import suppress
 from datetime import datetime
 
 import aiohttp
 
-from . import exceptions
 from .api import SpeedportApi
 from .device import WlanDevice
-
-_LOGGER = logging.getLogger(__name__)
-_LOGGER.setLevel(logging.WARNING)
-
-
-class LoginException(Exception):
-    pass
 
 
 class Speedport:
     def __init__(
         self,
-        host: str = "speedport.ip",
-        password: str = "",
-        https: bool = False,
-        session: aiohttp.ClientSession | None = None,
+        host: str,
+        password: str,
+        https: bool,
+        session: aiohttp.ClientSession,
         pause_time: int = 5,
     ):
-        self._api: SpeedportApi | None = None
-        self._host: str = host
-        self._password: str = password
-        self._https: bool = https
-        self._session: aiohttp.ClientSession | None = session
+        self._api = SpeedportApi(host, password, https, session, pause_time)
         self._status = {}
         self._ip_data = {}
-        self._pause_time = pause_time
-
-    async def __aenter__(self):
-        return await self.create()
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.close()
 
     def __getitem__(self, item):
         if (status := self._status.get(item)) is not None:
@@ -54,26 +33,15 @@ class Speedport:
             return default
 
     async def create(self):
-        self._api = await SpeedportApi(
-            self._host, self._password, self._https, self._session, self._pause_time
-        ).create()
         await self.update_status()
         return self
 
-    async def close(self):
-        if self._api:
-            await self._api.close()
-
     def set_pause_time(self, pause_time: int):
-        if self._api:
-            self._api.pause_time = pause_time
-        self._pause_time = pause_time
+        self._api.pause_time = pause_time
 
     @property
     def api(self) -> SpeedportApi:
-        if self._api:
-            return self._api
-        raise ConnectionError()
+        return self._api
 
     @property
     async def devices(self) -> dict[str, WlanDevice]:
@@ -111,8 +79,8 @@ class Speedport:
         await self.api.set_wifi(status=False, office=True)
 
     async def update_ip_data(self):
-        with suppress(exceptions.LoginPausedError):
-            self._ip_data = await self.api.get_ip_data()
+        """Raises LoginPausedError while the session is lost; data stays as it was."""
+        self._ip_data = await self.api.get_ip_data()
 
     async def update_status(self):
         self._status = await self.api.get_status()
@@ -229,5 +197,5 @@ class Speedport:
     async def wps_remaining(self):
         return int((await self.api.get_wps_state())["wlan_wps_state"])
 
-    async def login(self, password=""):
-        return await self.api.login(password or self._password)
+    async def login(self):
+        return await self.api.login()

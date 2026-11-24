@@ -1,3 +1,4 @@
+import asyncio
 import functools
 import logging
 from datetime import datetime, timedelta
@@ -10,31 +11,57 @@ from .connection import Connection
 _LOGGER = logging.getLogger(__name__)
 
 
-def need_auth(func):
+def serialized(func):
+    """Run one request sequence at a time.
+
+    Cookie jar, httoken and login key belong to the one router session, and
+    callers (polling, device list, switches) are independent of each other.
+    """
+
     @functools.wraps(func)
     async def inner(self: "SpeedportApi", *args, **kwargs):
-        if not self.api.is_logged_in:
-            if not self.password:
-                error = f'You need to set a password to use "{func.__name__}"'
-                _LOGGER.error(error)
-                raise PermissionError(error)
-            await self.api.login(self.password)
-        try:
+        async with self._lock:
             return await func(self, *args, **kwargs)
-        except exceptions.DecryptionKeyError as exception:
-            if not self.last_logout:
-                _LOGGER.info(f"Paused fetching for {self.pause_time} min")
-                self.last_logout = datetime.now()
-            if datetime.now() > (
-                time := self.last_logout + timedelta(minutes=self.pause_time)
-            ):
-                self.last_logout = None
+
+    return inner
+
+
+def need_auth(func):
+    """Log in when needed; a lost session pauses logins instead of fighting
+    whoever took it over (the router allows one session, e.g. the web UI)."""
+
+    @functools.wraps(func)
+    @serialized
+    async def inner(self: "SpeedportApi", *args, **kwargs):
+        if not self.password:
+            error = f'You need to set a password to use "{func.__name__}"'
+            _LOGGER.error(error)
+            raise PermissionError(error)
+        if self._paused_until and datetime.now() < self._paused_until:
+            raise exceptions.LoginPausedError(
+                f"Login paused until {self._paused_until:%H:%M:%S}"
+            )
+        fresh_login = not self.api.is_logged_in
+        try:
+            if fresh_login:
                 await self.api.login(self.password)
-                return await func(self, *args, **kwargs)
-            remaining = time - datetime.now()
-            error = f"Paused for 00:{remaining.seconds // 60:02d}:{remaining.seconds % 60:02d}"
-            _LOGGER.debug(error)
-            raise exceptions.LoginPausedError(error) from exception
+            return await func(self, *args, **kwargs)
+        except (exceptions.SessionError, exceptions.LoginException) as exception:
+            # Forget key and cookies: the next attempt is the same fresh login
+            # as the very first one.
+            self.api.clear()
+            self._paused_until = datetime.now() + timedelta(minutes=self.pause_time)
+            _LOGGER.log(
+                # Losing a working session is expected, a failing login is not.
+                logging.WARNING if fresh_login else logging.INFO,
+                "%s: %s. Next login in %s min",
+                "Login failed" if fresh_login else "Session lost",
+                exception,
+                self.pause_time,
+            )
+            if isinstance(exception, exceptions.LoginException):
+                raise
+            raise exceptions.LoginPausedError(str(exception)) from exception
 
     return inner
 
@@ -42,40 +69,22 @@ def need_auth(func):
 class SpeedportApi:
     def __init__(
         self,
-        host: str = "speedport.ip",
-        password: str = "",
-        https: bool = False,
-        session: aiohttp.ClientSession | None = None,
+        host: str,
+        password: str,
+        https: bool,
+        session: aiohttp.ClientSession,
         pause_time: int = 5,
     ):
-        self._api: Connection | None = None
-        self._host: str = host
         self._password: str = password
-        self._https: bool = https
         self._url = f"https://{host}" if https else f"http://{host}"
-        self._session: aiohttp.ClientSession | None = session
+        self._api = Connection(self._url, session)
         self._pause_time: int = pause_time
-        self._last_logout: datetime | None = None
-
-    async def __aenter__(self):
-        return await self.create()
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.close()
-
-    async def create(self):
-        self._api = await Connection(self._url, self._session).create()
-        return self
-
-    async def close(self):
-        if self._api:
-            await self._api.close()
+        self._paused_until: datetime | None = None
+        self._lock = asyncio.Lock()
 
     @property
     def api(self) -> Connection:
-        if self._api:
-            return self._api
-        raise ConnectionError()
+        return self._api
 
     @property
     def password(self) -> str:
@@ -93,14 +102,6 @@ class SpeedportApi:
     def pause_time(self, pause_time: int):
         self._pause_time = pause_time
 
-    @property
-    def last_logout(self) -> datetime | None:
-        return self._last_logout
-
-    @last_logout.setter
-    def last_logout(self, last_logout: datetime | None):
-        self._last_logout = last_logout
-
     @need_auth
     async def get_secure_status(self):
         return await self.api.get("data/SecureStatus.json", auth=True)
@@ -109,15 +110,19 @@ class SpeedportApi:
     async def get_phone_handler(self):
         return await self.api.get("data/IPPhoneHandler.json", auth=True)
 
+    @serialized
     async def get_router(self):
         return await self.api.get("data/Router.json")
 
+    @serialized
     async def get_status(self):
         return await self.api.get("data/Status.json")
 
+    @serialized
     async def get_devices(self):
         return await self.api.get("data/DeviceList.json")
 
+    @serialized
     async def get_login(self):
         return await self.api.get("data/Login.json")
 
@@ -175,5 +180,6 @@ class SpeedportApi:
             "html/content/config/restart.html",
         )
 
+    @serialized
     async def login(self, password=""):
         return await self.api.login(password or self.password)

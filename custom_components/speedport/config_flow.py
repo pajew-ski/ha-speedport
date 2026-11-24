@@ -5,18 +5,17 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import aiohttp
-from .speedport_api import Speedport
-from .speedport_api.exceptions import LoginException
 import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import aiohttp_client
 
 from .const import DOMAIN
+from .device import UPDATE_ERRORS, async_create_session
+from .speedport_api import Speedport
+from .speedport_api.exceptions import LoginException
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,21 +31,24 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
     """Validate the user input allows us to connect."""
 
-    # Same session as async_setup_entry, so the check resolves the host the
-    # same way the running integration will (issue #14).
+    # Same kind of session as async_setup_entry, so the check resolves the host
+    # the same way the running integration will (issue #14).
+    session = async_create_session(hass, auto_cleanup=False)
     speedport = Speedport(
         host=data["host"],
         password=data["password"],
         https=data["https"],
-        session=aiohttp_client.async_get_clientsession(hass),
+        session=session,
     )
     try:
         await speedport.create()
-        await speedport.login(data["password"])
-    except (aiohttp.ClientError, TimeoutError) as exc:
-        raise CannotConnect from exc
+        await speedport.login()
     except LoginException as exc:
         raise InvalidAuth from exc
+    except UPDATE_ERRORS as exc:
+        raise CannotConnect from exc
+    finally:
+        session.detach()
 
     # Return info that you want to store in the config entry.
     return {"title": "Speedport"}
