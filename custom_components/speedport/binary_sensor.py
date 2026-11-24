@@ -9,7 +9,7 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from speedport import Speedport
+from .speedport_api import Speedport
 
 from .const import DOMAIN
 from .device import SpeedportEntity

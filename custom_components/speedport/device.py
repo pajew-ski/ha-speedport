@@ -7,7 +7,7 @@ from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     CoordinatorEntity,
 )
-from speedport import Speedport
+from .speedport_api import Speedport
 
 from .const import DOMAIN, UPDATE_INTERVAL
 

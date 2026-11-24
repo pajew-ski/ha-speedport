@@ -6,8 +6,8 @@ import logging
 from typing import Any
 
 import aiohttp
-from speedport import Speedport
-from speedport.exceptions import LoginException
+from .speedport_api import Speedport
+from .speedport_api.exceptions import LoginException
 import voluptuous as vol
 
 from homeassistant import config_entries

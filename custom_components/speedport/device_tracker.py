@@ -12,8 +12,8 @@ from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
     DataUpdateCoordinator,
 )
-from speedport import Speedport
-from speedport.device import WlanDevice
+from .speedport_api import Speedport
+from .speedport_api.device import WlanDevice
 
 from .const import DOMAIN
 

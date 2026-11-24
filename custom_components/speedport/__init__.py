@@ -9,7 +9,7 @@ from homeassistant.helpers.device_registry import (
     DeviceEntry,
     format_mac,
 )
-from speedport import Speedport, connection, exceptions
+from .speedport_api import Speedport, connection, exceptions
 
 from .config_flow import OptionsFlowHandler
 from .const import DOMAIN
@@ -22,7 +22,7 @@ def _decode_mac_safe(data, key: str = ""):
     # another key; the library raises a bare ValueError ("MAC check failed") that
     # its need_auth wrapper ignores, so it never logs in again. Map it to the
     # error need_auth handles (pause, then re-login).
-    # shortcut: patches speedport-api <= 0.6.0, drop once upstream decode() maps it.
+    # shortcut: patches the vendored copy from outside, moves into decode() next.
     try:
         return _decode(data, key)
     except ValueError as exc:
