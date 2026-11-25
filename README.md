@@ -21,7 +21,7 @@ which is no longer released, and is maintained here.
 
 ## Supported devices
 
-* Speedport Smart 3
+* Speedport Smart 3 (no IP address sensors: the router does not provide them)
 * Speedport Smart 4
 
 ## Installation

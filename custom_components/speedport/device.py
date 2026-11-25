@@ -14,12 +14,23 @@ from homeassistant.helpers.update_coordinator import (
 
 from .const import DOMAIN, UPDATE_INTERVAL
 from .speedport_api import Speedport
-from .speedport_api.exceptions import LoginException, LoginPausedError, SessionError
+from .speedport_api.exceptions import (
+    LoginException,
+    LoginPausedError,
+    NotAvailableError,
+    SessionError,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 # What a router that is rebooting, unreachable or not serving data raises.
-UPDATE_ERRORS = (aiohttp.ClientError, TimeoutError, SessionError, LoginPausedError)
+UPDATE_ERRORS = (
+    aiohttp.ClientError,
+    TimeoutError,
+    SessionError,
+    LoginPausedError,
+    NotAvailableError,
+)
 
 
 def async_create_session(hass: HomeAssistant, **kwargs) -> aiohttp.ClientSession:

@@ -16,3 +16,7 @@ class UnexpectedResponseError(SessionError):
 
 class LoginPausedError(PermissionError):
     """No login is attempted until the pause after a lost session is over."""
+
+
+class NotAvailableError(Exception):
+    """The router does not have the requested page or data (HTTP 404)."""

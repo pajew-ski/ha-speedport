@@ -1,9 +1,17 @@
-from datetime import datetime
+import logging
+from datetime import datetime, timedelta
 
 import aiohttp
 
+from . import exceptions
 from .api import SpeedportApi
 from .device import WlanDevice
+
+_LOGGER = logging.getLogger(__name__)
+
+# A router without IP data (Speedport Smart 3, #19) is asked again this rarely;
+# that also covers one that answered 404 only while it was restarting.
+IP_DATA_RETRY = timedelta(hours=1)
 
 
 class Speedport:
@@ -18,6 +26,7 @@ class Speedport:
         self._api = SpeedportApi(host, password, https, session, pause_time)
         self._status = {}
         self._ip_data = {}
+        self._ip_data_retry_at: datetime | None = None
 
     def __getitem__(self, item):
         if (status := self._status.get(item)) is not None:
@@ -80,7 +89,16 @@ class Speedport:
 
     async def update_ip_data(self):
         """Raises LoginPausedError while the session is lost; data stays as it was."""
-        self._ip_data = await self.api.get_ip_data()
+        if self._ip_data_retry_at and datetime.now() < self._ip_data_retry_at:
+            return
+        try:
+            self._ip_data = await self.api.get_ip_data()
+        except exceptions.NotAvailableError as exc:
+            if not self._ip_data_retry_at:
+                _LOGGER.info("No IP data: %s", exc)
+            self._ip_data_retry_at = datetime.now() + IP_DATA_RETRY
+        else:
+            self._ip_data_retry_at = None
 
     async def update_status(self):
         self._status = await self.api.get_status()

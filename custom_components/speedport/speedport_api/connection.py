@@ -71,6 +71,12 @@ class Connection:
 
     @staticmethod
     async def _decode(response: aiohttp.ClientResponse, key: str = ""):
+        if response.status == 404:
+            # Not a session problem: logging in again would not change it. The
+            # Speedport Smart 3 has no IP data page at all (#19).
+            raise exceptions.NotAvailableError(
+                f"{response.url.path} is not available on this router (HTTP 404)"
+            )
         try:
             return decode(await response.text(), key=key)
         except exceptions.UnexpectedResponseError as exc:
@@ -118,7 +124,7 @@ class Connection:
             return response["challenge"]
         except (KeyError, TypeError) as exc:
             raise exceptions.UnexpectedResponseError(
-                f"No login challenge in {response!r}"
+                "The router sent no login challenge"
             ) from exc
 
     async def login(self, password: str):
@@ -130,15 +136,18 @@ class Connection:
         async with self._session.post(url, data=data, **self._kwargs) as response:
             _LOGGER.debug("POST - %s - %s", url, response.status)
             result = await self._decode(response)
-            _LOGGER.debug(result)
         if not isinstance(result, dict):
-            raise exceptions.UnexpectedResponseError(f"No login result in {result!r}")
+            raise exceptions.UnexpectedResponseError("The router sent no login result")
+        # Only these two fields: the answer also has fields such as t_number and
+        # t_password, which must not end up in a log.
+        state = f"{result.get('login')}, locked: {result.get('login_locked')}"
+        _LOGGER.debug("Login: %s", state)
         if (sleep_time := result.get("login_locked")) and int(sleep_time) < 60:
             _LOGGER.warning("Can't login, wait %ss...", sleep_time)
             await asyncio.sleep(int(sleep_time) + 1)
             return await self.login(password)
         if result.get("login") != "success":
-            raise exceptions.LoginException(f"Can't login: {result}")
+            raise exceptions.LoginException(f"Can't login: {state}")
         # Only now: is_logged_in must not be true for a login that failed halfway.
         self._login_key = challenge
         return result["login"]
