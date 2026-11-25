@@ -20,6 +20,11 @@ from .speedport_api import Speedport
 from .const import DOMAIN
 from .device import SpeedportEntity, get_coordinator
 
+# The Speedport Smart 3 reports the DSL link rates in kbit/s, the Smart 4 in
+# bit/s (#19). Confirmed for the downstream value; the upstream value is taken
+# to follow the same unit.
+SMART_3_KBIT = {"dsl_downstream", "dsl_upstream"}
+
 SENSORS: tuple[SensorEntityDescription, ...] = (
     SensorEntityDescription(
         key="public_ip_v4",
@@ -138,6 +143,12 @@ class SpeedportSensor(SpeedportEntity, SensorEntity):
             # Der Router meldet Ortszeit. Die Zeitzone der Instanz ist geladen; pytz.timezone()
             # las seine Datei in der Event-Schleife und HA meldete das als blockierend.
             return date.replace(tzinfo=dt_util.get_default_time_zone())
+        if (
+            self.entity_description.key in SMART_3_KBIT
+            and "Smart 3" in self._speedport.device_name
+            and data.isdigit()
+        ):
+            return int(data) * 1000
         return data
 
     @property

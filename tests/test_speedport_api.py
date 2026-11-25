@@ -9,6 +9,7 @@ import asyncio
 import json
 import secrets
 import unittest
+from datetime import datetime
 from hashlib import sha256
 from types import SimpleNamespace
 
@@ -29,6 +30,8 @@ from custom_components.speedport.speedport_api.exceptions import (
 PASSWORD = "secret"
 LOGIN_PAGE = '<html><div id="is_login_page"></div><script>_httoken = 1;</script></html>'
 PAUSE = 0.002  # minutes
+# What the debug log of a Speedport Smart 3 shows as HTTP 404 (#19).
+SMART_3_MISSING = {"", "html/content/internet/con_ipdata.html", "data/IPData.json"}
 PAUSE_OVER = PAUSE * 60 + 0.05  # seconds
 
 
@@ -43,6 +46,7 @@ class FakeRouter:
         self.sessions = {}
         self.requests = []
         self.pages = {}  # path -> how often to answer with the login page
+        self.missing = set()  # paths this router does not have: HTTP 404
         self.wrong_key = False
         self.inflight = self.max_inflight = 0
 
@@ -74,7 +78,9 @@ class FakeRouter:
             response.set_cookie("SessionID_R3", sid, path="/")
         session = self.sessions[sid]
         response.text = LOGIN_PAGE
-        if self.pages.get(path, 0) > 0:
+        if path in self.missing:
+            response.set_status(404)
+        elif self.pages.get(path, 0) > 0:
             self.pages[path] -= 1
         elif path == "data/Status.json":
             response.text = encrypted({"device_name": "Smart 3", "serial_number": "1"})
@@ -92,7 +98,9 @@ class FakeRouter:
                 if ok := form["password"] == sha256(secret).hexdigest():
                     self.kick()
                     session["auth"] = True
-                response.text = encrypted({"login": "success" if ok else "failed"})
+                response.text = encrypted(
+                    {"login": "success" if ok else "failed", "t_password": "ACCESS"}
+                )
         elif path.endswith(".html") and session["auth"]:
             response.text = "<script>_httoken = 2;</script>"
         elif path == "data/IPData.json" and session["auth"]:
@@ -191,6 +199,40 @@ class SpeedportApiTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(LoginException):  # the config flow's direct check
             await speedport.login()
 
+    async def test_router_without_ip_data_is_not_logged_into_again(self):
+        """A Speedport Smart 3 answers the IP data page and the data with 404
+        (#19): that is no lost session, so no pause and no further login."""
+        # "" is the page the login reads its token from: also 404 there.
+        self.router.missing = SMART_3_MISSING
+        speedport = await self.connect()
+        logins = self.router.count("data/Login.json")
+        for _ in range(3):
+            await speedport.update_ip_data()
+        self.assertEqual(self.router.count("data/Login.json"), logins + 2)
+        self.assertEqual(self.router.count("data/IPData.json"), 2)  # setUp + 1
+        self.assertEqual(speedport.public_ip_v4, "")
+
+        # Asked again after the retry time, still without a login.
+        speedport._ip_data_retry_at = datetime.now()
+        await speedport.update_ip_data()
+        self.assertEqual(self.router.count("data/IPData.json"), 3)
+        self.assertEqual(self.router.count("data/Login.json"), logins + 2)
+
+        # A router that only answered 404 for a while delivers again.
+        self.router.missing = set()
+        speedport._ip_data_retry_at = datetime.now()
+        await speedport.update_ip_data()
+        self.assertEqual(speedport.public_ip_v4, "192.0.2.1")
+
+    async def test_login_answer_is_not_logged(self):
+        """It carries more than the result, e.g. a t_password field."""
+        with self.assertLogs("custom_components.speedport", "DEBUG") as logs:
+            await self.speedport.login()
+            with self.assertRaises(LoginException) as raised:
+                await (await self.connect("wrong")).login()
+        self.assertNotIn("ACCESS", "".join(logs.output) + str(raised.exception))
+        self.assertIn("Can't login: failed", str(raised.exception))
+
     async def test_answer_with_another_key(self):
         self.router.wrong_key = True
         with self.assertRaises(LoginPausedError) as raised:
@@ -219,6 +261,9 @@ class SpeedportApiTest(unittest.IsolatedAsyncioTestCase):
         await SpeedportCoordinator._async_update_data(coordinator)  # paused
 
         self.router.pages["data/Status.json"] = 1
+        with self.assertRaises(UpdateFailed):
+            await SpeedportCoordinator._async_update_data(coordinator)
+        self.router.missing = {"data/Status.json"}  # e.g. while it restarts
         with self.assertRaises(UpdateFailed):
             await SpeedportCoordinator._async_update_data(coordinator)
         await self.runner.cleanup()  # router gone
