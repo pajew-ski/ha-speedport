@@ -38,13 +38,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     try:
         await speedport.create()
-        # Strict here: sensors exist only for values present now, so a router
-        # that is not ready must postpone the setup instead of dropping them.
+    except UPDATE_ERRORS as exc:
+        raise ConfigEntryNotReady(str(exc)) from exc
+    # The IP data needs a login and may arrive later (sensor.py adds its sensors
+    # then). Failing the setup over it would make Home Assistant retry, and each
+    # retry would log in again and push whoever uses the web UI out (#19).
+    try:
         await speedport.update_ip_data()
     except LoginException as exc:
         raise ConfigEntryError(f"The router rejected the login: {exc}") from exc
-    except UPDATE_ERRORS as exc:
-        raise ConfigEntryNotReady(str(exc)) from exc
+    except UPDATE_ERRORS:
+        pass
     hass.data[DOMAIN][entry.entry_id] = speedport
     hass.data[DOMAIN]["coordinators"] = {}
 
