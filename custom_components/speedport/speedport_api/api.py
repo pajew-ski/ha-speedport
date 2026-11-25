@@ -37,31 +37,36 @@ def need_auth(func):
             error = f'You need to set a password to use "{func.__name__}"'
             _LOGGER.error(error)
             raise PermissionError(error)
-        if self._paused_until and datetime.now() < self._paused_until:
+        paused = bool(self._paused_until) and datetime.now() < self._paused_until
+        # Without a session, or once the pause after a lost one is over.
+        login = not self.api.is_logged_in or (bool(self._paused_until) and not paused)
+        if login and paused:
             raise exceptions.LoginPausedError(
                 f"Login paused until {self._paused_until:%H:%M:%S}"
             )
-        fresh_login = not self.api.is_logged_in
         try:
-            if fresh_login:
+            if login:
                 await self.api.login(self.password)
-            return await func(self, *args, **kwargs)
+            # While paused the request still goes out with the session at hand:
+            # a router that only hiccupped serves it again without a new login.
+            result = await func(self, *args, **kwargs)
         except (exceptions.SessionError, exceptions.LoginException) as exception:
-            # Forget key and cookies: the next attempt is the same fresh login
-            # as the very first one.
-            self.api.clear()
-            self._paused_until = datetime.now() + timedelta(minutes=self.pause_time)
-            _LOGGER.log(
-                # Losing a working session is expected, a failing login is not.
-                logging.WARNING if fresh_login else logging.INFO,
-                "%s: %s. Next login in %s min",
-                "Login failed" if fresh_login else "Session lost",
-                exception,
-                self.pause_time,
-            )
+            if not paused:
+                self._paused_until = datetime.now() + timedelta(minutes=self.pause_time)
+                _LOGGER.log(
+                    # Losing a working session is expected, failing right after
+                    # a login is not.
+                    logging.WARNING if login else logging.INFO,
+                    "%s: %s. Next login in %s min",
+                    "No working session after login" if login else "Session lost",
+                    exception,
+                    self.pause_time,
+                )
             if isinstance(exception, exceptions.LoginException):
                 raise
             raise exceptions.LoginPausedError(str(exception)) from exception
+        self._paused_until = None
+        return result
 
     return inner
 

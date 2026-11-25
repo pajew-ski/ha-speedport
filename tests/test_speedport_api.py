@@ -136,34 +136,49 @@ class SpeedportApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(raised.exception.__cause__, UnexpectedResponseError)
         self.assertIn("/data/IPData.json answered HTTP 200", str(raised.exception))
 
-        # Paused: nothing is sent that needs the session, nobody is logged out.
-        before = len(self.router.requests)
+        # Paused: no login, so nobody using the web UI is logged out.
+        logins = self.router.count("data/Login.json")
         with self.assertRaises(LoginPausedError):
             await self.speedport.update_ip_data()
-        self.assertEqual(len(self.router.requests), before)
+        self.assertEqual(self.router.count("data/Login.json"), logins)
         self.assertEqual(self.speedport.public_ip_v4, "192.0.2.1")  # kept
 
         await asyncio.sleep(PAUSE_OVER)
         await self.speedport.update_ip_data()
-        self.assertEqual(self.router.count("data/Login.json"), 4)  # two logins
+        self.assertEqual(self.router.count("data/Login.json"), logins + 2)
 
-    async def test_failed_relogin_pauses_again(self):
-        """The two paths that used to leak a raw DecryptionKeyError (#16)."""
-        for path in ("data/IPData.json", "data/Login.json"):
-            with self.subTest(page_instead_of=path):
-                self.router.kick()
-                with self.assertRaises(LoginPausedError):
-                    await self.speedport.update_ip_data()
-                await asyncio.sleep(PAUSE_OVER)
-                self.router.pages[path] = 1
+    async def test_session_that_works_again_needs_no_login(self):
+        """A page from a router that still knows the session, also right after
+        a login (#19): the next request is served without logging in again."""
+        for after_login in (False, True):
+            with self.subTest(after_login=after_login):
+                if after_login:
+                    self.router.kick()
+                    with self.assertRaises(LoginPausedError):
+                        await self.speedport.update_ip_data()
+                    await asyncio.sleep(PAUSE_OVER)
+                self.router.pages["data/IPData.json"] = 1
                 with self.assertRaises(LoginPausedError):
                     await self.speedport.update_ip_data()
                 logins = self.router.count("data/Login.json")
-                with self.assertRaises(LoginPausedError):
-                    await self.speedport.update_ip_data()
-                self.assertEqual(self.router.count("data/Login.json"), logins)
-                await asyncio.sleep(PAUSE_OVER)
                 await self.speedport.update_ip_data()
+                await self.speedport.update_ip_data()  # and the pause is over
+                self.assertEqual(self.router.count("data/Login.json"), logins)
+
+    async def test_failed_login_is_not_repeated_during_the_pause(self):
+        self.router.kick()
+        with self.assertRaises(LoginPausedError):
+            await self.speedport.update_ip_data()
+        await asyncio.sleep(PAUSE_OVER)
+        self.router.pages["data/Login.json"] = 1
+        with self.assertRaises(LoginPausedError):  # used to be a raw error (#16)
+            await self.speedport.update_ip_data()
+        requests = len(self.router.requests)
+        with self.assertRaises(LoginPausedError):
+            await self.speedport.update_ip_data()
+        self.assertEqual(len(self.router.requests), requests)
+        await asyncio.sleep(PAUSE_OVER)
+        await self.speedport.update_ip_data()
 
     async def test_rejected_password_is_not_retried_during_the_pause(self):
         speedport = await self.connect("wrong")
@@ -182,12 +197,11 @@ class SpeedportApiTest(unittest.IsolatedAsyncioTestCase):
             await self.speedport.update_ip_data()
         self.assertIsInstance(raised.exception.__cause__, DecryptionKeyError)
 
-    async def test_login_starts_from_an_empty_cookie_jar(self):
+    async def test_login_keeps_the_cookies(self):
+        """As speedport-api always did; emptying the jar is suspected in #19."""
         cookie = next(iter(self.session.cookie_jar)).value
         await self.speedport.login()
-        cookies = [c.value for c in self.session.cookie_jar]
-        self.assertEqual(len(cookies), 1)
-        self.assertNotEqual(cookies[0], cookie)
+        self.assertEqual([c.value for c in self.session.cookie_jar], [cookie])
 
     async def test_request_sequences_never_overlap(self):
         self.router.kick()  # includes a login

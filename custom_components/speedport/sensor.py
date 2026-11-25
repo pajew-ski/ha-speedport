@@ -11,14 +11,14 @@ from homeassistant.const import (
     UnitOfDataRate,
     SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
 from homeassistant.util import dt as dt_util
 from .speedport_api import Speedport
 
 from .const import DOMAIN
-from .device import SpeedportEntity
+from .device import SpeedportEntity, get_coordinator
 
 SENSORS: tuple[SensorEntityDescription, ...] = (
     SensorEntityDescription(
@@ -102,14 +102,27 @@ async def async_setup_entry(
 ) -> None:
     """Set up entry."""
     speedport: Speedport = hass.data[DOMAIN][entry.entry_id]
+    known: set[str] = set()
 
-    entities = [
-        SpeedportSensor(hass, speedport, description)
-        for description in SENSORS
-        if speedport.get(description.key) is not None
-    ]
+    @callback
+    def _add_new_sensors() -> None:
+        # Values that need a login can be missing at setup and arrive later.
+        new = [
+            description
+            for description in SENSORS
+            if description.key not in known
+            and speedport.get(description.key) is not None
+        ]
+        known.update(description.key for description in new)
+        if new:
+            async_add_entities(
+                SpeedportSensor(hass, speedport, description) for description in new
+            )
 
-    async_add_entities(entities)
+    _add_new_sensors()
+    entry.async_on_unload(
+        get_coordinator(hass, speedport).async_add_listener(_add_new_sensors)
+    )
 
 
 class SpeedportSensor(SpeedportEntity, SensorEntity):

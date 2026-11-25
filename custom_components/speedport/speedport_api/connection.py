@@ -7,7 +7,6 @@ from json import JSONDecodeError
 
 import aiohttp
 from Crypto.Cipher import AES
-from yarl import URL
 
 from . import const, exceptions
 
@@ -149,5 +148,8 @@ class Connection:
         return bool(self._login_key)
 
     def clear(self):
+        # The cookies stay, as they always did with speedport-api (its
+        # clear_domain(url) never matched). Emptying the jar before the login is
+        # the suspected cause of a login without a usable session on the Smart 3
+        # (#19).
         self._login_key = ""
-        self._session.cookie_jar.clear_domain(URL(self._url).host)
