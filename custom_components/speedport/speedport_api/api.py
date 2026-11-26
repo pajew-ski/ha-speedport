@@ -26,9 +26,15 @@ def serialized(func):
     return inner
 
 
-def need_auth(func):
+def need_auth(func=None, *, action=False):
     """Log in when needed; a lost session pauses logins instead of fighting
-    whoever took it over (the router allows one session, e.g. the web UI)."""
+    whoever took it over (the router allows one session, e.g. the web UI).
+
+    An action (switch, button) is what the user asked for right now: a session
+    the router has dropped meanwhile gets one fresh login instead of the pause.
+    """
+    if func is None:
+        return functools.partial(need_auth, action=action)
 
     @functools.wraps(func)
     @serialized
@@ -55,6 +61,10 @@ def need_auth(func):
             # a router that only hiccupped serves it again without a new login.
             result = await func(self, *args, **kwargs)
         except (exceptions.SessionError, exceptions.LoginException) as exception:
+            if action and not login and isinstance(exception, exceptions.SessionError):
+                await self.api.login(self.password)
+                self._paused_until = None
+                return await func(self, *args, **kwargs)
             if not paused:
                 self._paused_until = datetime.now() + timedelta(minutes=self.pause_time)
                 _LOGGER.log(
@@ -145,7 +155,7 @@ class SpeedportApi:
         referer = "html/content/network/wlan_wps.html"
         return await self.api.get("data/WPSStatus.json", referer=referer)
 
-    @need_auth
+    @need_auth(action=True)
     async def set_wifi(self, status=True, guest=False, office=False):
         """Set wifi on/off"""
         extra = "guest" if guest else "office" if office else ""
@@ -162,7 +172,7 @@ class SpeedportApi:
             f"data/{'WLANBasic' if extra else 'Modules'}.json", data, referer
         )
 
-    @need_auth
+    @need_auth(action=True)
     async def wps_on(self):
         _LOGGER.info("Enable wps connect...")
         await self.api.post(
@@ -171,7 +181,7 @@ class SpeedportApi:
             "html/content/network/wlan_wps.html",
         )
 
-    @need_auth
+    @need_auth(action=True)
     async def reconnect(self):
         _LOGGER.info("Reconnect with internet provider...")
         await self.api.post(
@@ -180,7 +190,7 @@ class SpeedportApi:
             "html/content/internet/con_ipdata.html",
         )
 
-    @need_auth
+    @need_auth(action=True)
     async def reboot(self):
         _LOGGER.info("Reboot speedport...")
         await self.api.post(

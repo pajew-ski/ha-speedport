@@ -101,6 +101,8 @@ class FakeRouter:
                 response.text = encrypted(
                     {"login": "success" if ok else "failed", "t_password": "ACCESS"}
                 )
+        elif request.method == "POST" and session["auth"]:  # switches, buttons
+            response.text = encrypted({"status": "ok"}, session["challenge"])
         elif path.endswith(".html") and session["auth"]:
             response.text = "<script>_httoken = 2;</script>"
         elif path == "data/IPData.json" and session["auth"]:
@@ -214,6 +216,27 @@ class SpeedportApiTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.router.count("data/Login.json"), logins + 2)
         self.assertEqual(self.router.count("data/IPData.json"), 2)  # setUp + 1
         self.assertEqual(speedport.public_ip_v4, "")
+
+    async def test_switch_works_after_the_router_dropped_the_session(self):
+        """On a Smart 3 nothing keeps the session alive once the IP data is
+        known to be missing. A switch the user turns logs in again at once
+        instead of failing and waiting for the pause."""
+        self.router.missing = SMART_3_MISSING
+        speedport = await self.connect()
+        await speedport.update_ip_data()
+        self.router.kick()  # the router drops the idle session
+        logins = self.router.count("data/Login.json")
+        await speedport.wifi_on()
+        self.assertEqual(self.router.count("data/Login.json"), logins + 2)
+        self.assertEqual(self.router.count("data/Modules.json"), 2)  # then again
+
+        # Polling still pauses instead of fighting a web UI session.
+        self.router.kick()
+        self.router.missing = set()
+        speedport._ip_data_missing = False
+        with self.assertRaises(LoginPausedError):
+            await speedport.update_ip_data()
+        self.assertEqual(self.router.count("data/Login.json"), logins + 2)
 
     async def test_router_that_had_ip_data_is_asked_again_later(self):
         """404 from a router that delivered before, e.g. while it restarts."""
