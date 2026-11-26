@@ -20,10 +20,9 @@ from .speedport_api import Speedport
 from .const import DOMAIN
 from .device import SpeedportEntity, get_coordinator
 
-# The Speedport Smart 3 reports the DSL link rates in kbit/s, the Smart 4 in
-# bit/s (#19). Confirmed for the downstream value; the upstream value is taken
-# to follow the same unit.
-SMART_3_KBIT = {"dsl_downstream", "dsl_upstream"}
+# The Speedport Smart 3 reports these rates in kbit/s, the Smart 4 in bit/s.
+# Confirmed on a Smart 3 against the router's own log (#19).
+SMART_3_KBIT = {"dsl_downstream", "dsl_upstream", "inet_download", "inet_upload"}
 
 SENSORS: tuple[SensorEntityDescription, ...] = (
     SensorEntityDescription(

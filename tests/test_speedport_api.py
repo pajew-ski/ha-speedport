@@ -199,30 +199,51 @@ class SpeedportApiTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(LoginException):  # the config flow's direct check
             await speedport.login()
 
-    async def test_router_without_ip_data_is_not_logged_into_again(self):
+    async def test_router_without_ip_data_is_not_asked_again(self):
         """A Speedport Smart 3 answers the IP data page and the data with 404
-        (#19): that is no lost session, so no pause and no further login."""
+        (#19): no pause, no further login, and no further request."""
         # "" is the page the login reads its token from: also 404 there.
         self.router.missing = SMART_3_MISSING
         speedport = await self.connect()
         logins = self.router.count("data/Login.json")
         for _ in range(3):
             await speedport.update_ip_data()
+        self.router.kick()  # the router drops the idle session
+        speedport._ip_data_retry_at = datetime.now()  # not even after an hour
+        await speedport.update_ip_data()
         self.assertEqual(self.router.count("data/Login.json"), logins + 2)
         self.assertEqual(self.router.count("data/IPData.json"), 2)  # setUp + 1
         self.assertEqual(speedport.public_ip_v4, "")
 
-        # Asked again after the retry time, still without a login.
-        speedport._ip_data_retry_at = datetime.now()
-        await speedport.update_ip_data()
-        self.assertEqual(self.router.count("data/IPData.json"), 3)
-        self.assertEqual(self.router.count("data/Login.json"), logins + 2)
+    async def test_router_that_had_ip_data_is_asked_again_later(self):
+        """404 from a router that delivered before, e.g. while it restarts."""
+        self.router.missing = {"data/IPData.json"}
+        await self.speedport.update_ip_data()
+        await self.speedport.update_ip_data()  # within the retry time
+        self.assertEqual(self.router.count("data/IPData.json"), 2)  # setUp + 1
+        self.assertEqual(self.speedport.public_ip_v4, "192.0.2.1")  # kept
 
-        # A router that only answered 404 for a while delivers again.
         self.router.missing = set()
-        speedport._ip_data_retry_at = datetime.now()
-        await speedport.update_ip_data()
-        self.assertEqual(speedport.public_ip_v4, "192.0.2.1")
+        self.speedport._ip_data_retry_at = datetime.now()
+        logins = self.router.count("data/Login.json")
+        await self.speedport.update_ip_data()
+        self.assertEqual(self.router.count("data/IPData.json"), 3)
+        self.assertEqual(self.router.count("data/Login.json"), logins)
+
+    async def test_login_after_a_pause_is_not_repeated(self):
+        """#19: once a pause was over and the login worked, an answer that is no
+        session problem (404) left the pause in place, and every later request
+        logged in again; on a Smart 3 polled every 30 min that was every 90 min."""
+        self.router.pages["data/IPData.json"] = 1  # e.g. the session expired
+        with self.assertRaises(LoginPausedError):
+            await self.speedport.update_ip_data()
+        await asyncio.sleep(PAUSE_OVER)
+        self.router.missing = {"data/IPData.json"}
+        await self.speedport.update_ip_data()  # logs in, then 404
+        logins = self.router.count("data/Login.json")
+        self.speedport._ip_data_retry_at = datetime.now()
+        await self.speedport.update_ip_data()
+        self.assertEqual(self.router.count("data/Login.json"), logins)
 
     async def test_login_answer_is_not_logged(self):
         """It carries more than the result, e.g. a t_password field."""

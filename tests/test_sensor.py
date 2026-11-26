@@ -29,8 +29,15 @@ class DslLinkRateTest(unittest.TestCase):
         raw = "204416000"
         self.assertEqual(value("Speedport Smart 4", "dsl_downstream", raw), raw)
 
-    def test_other_values_stay_as_reported(self):
-        self.assertEqual(value("Speedport Smart 3", "inet_download", "1200"), "1200")
+    def test_smart_3_reports_negotiated_rates_in_kbit(self):
+        """Same numbers as the router's own log shows in kbit/s (#19)."""
+        self.assertEqual(
+            value("Speedport Smart 3", "inet_download", "211785"), 211785000
+        )
+        self.assertEqual(value("Speedport Smart 3", "inet_upload", "43976"), 43976000)
+        self.assertEqual(value("Speedport Smart 4", "inet_upload", "43976"), "43976")
+
+    def test_empty_value_stays_as_reported(self):
         self.assertEqual(value("Speedport Smart 3", "dsl_downstream", ""), "")
 
 

@@ -47,6 +47,10 @@ def need_auth(func):
         try:
             if login:
                 await self.api.login(self.password)
+                # Logged in: the pause is over even if the request then fails
+                # for another reason (404 on a Smart 3). Left in place, it made
+                # every later request log in again (#19).
+                self._paused_until = None
             # While paused the request still goes out with the session at hand:
             # a router that only hiccupped serves it again without a new login.
             result = await func(self, *args, **kwargs)
