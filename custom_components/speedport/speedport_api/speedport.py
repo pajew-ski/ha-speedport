@@ -9,8 +9,8 @@ from .device import WlanDevice
 
 _LOGGER = logging.getLogger(__name__)
 
-# A router without IP data (Speedport Smart 3, #19) is asked again this rarely;
-# that also covers one that answered 404 only while it was restarting.
+# A router that delivered IP data and then answers 404 (e.g. while it restarts)
+# is asked again this rarely.
 IP_DATA_RETRY = timedelta(hours=1)
 
 
@@ -27,6 +27,7 @@ class Speedport:
         self._status = {}
         self._ip_data = {}
         self._ip_data_retry_at: datetime | None = None
+        self._ip_data_missing = False
 
     def __getitem__(self, item):
         if (status := self._status.get(item)) is not None:
@@ -89,11 +90,20 @@ class Speedport:
 
     async def update_ip_data(self):
         """Raises LoginPausedError while the session is lost; data stays as it was."""
-        if self._ip_data_retry_at and datetime.now() < self._ip_data_retry_at:
+        if self._ip_data_missing or (
+            self._ip_data_retry_at and datetime.now() < self._ip_data_retry_at
+        ):
             return
         try:
             self._ip_data = await self.api.get_ip_data()
         except exceptions.NotAvailableError as exc:
+            if not self._ip_data:
+                # Never delivered since the start: this model has none (Speedport
+                # Smart 3, #19). Each further try needs a login once the router
+                # has dropped the idle session.
+                _LOGGER.info("No IP data, not asked again until reload: %s", exc)
+                self._ip_data_missing = True
+                return
             if not self._ip_data_retry_at:
                 _LOGGER.info("No IP data: %s", exc)
             self._ip_data_retry_at = datetime.now() + IP_DATA_RETRY
